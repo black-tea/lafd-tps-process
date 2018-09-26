@@ -39,9 +39,6 @@ geom_buff <- function(boundary, ft) {
 # Function to process LAFD raw gps file into a spatial df
 lafd_process <- function(datapath, fname) {
   
-  # Extract veh_id
-  #veh_id <- strsplit(fname, "_")[[1]][1]
-  
   # Read in LAFD Data
   lafd_data <- read.csv(datapath,
                         header = TRUE,
@@ -78,10 +75,53 @@ lafd_process <- function(datapath, fname) {
   return(lafd_sf)
 }
 
+JoinPtstoPath <- function(pts) {
+  # Convert series of lafd points to path
+  #
+  # Args:
+  #   pts: sf df of lafd gps points
+  #
+  # Returns:
+  #   Linestring representing path of the vehicle
+  #   in sf df format
+  #
+  print(pts)
+  path <- pts %>%
+    group_by(run_id, incident_id, veh_id) %>%
+    summarize(start = min(timestmp),
+              end = max(timestmp),
+              Time.Sec = as.double(difftime(max(timestmp),min(timestmp)),units='secs'),
+              do_union=FALSE) %>%
+    st_cast("LINESTRING") %>%
+    # Calculate length and speed on corridor
+    mutate(
+      Miles = round((st_length(st_transform(geometry, 2229))/5280),2),
+      MPH = round((Miles/(Time.Sec/3600)),2)
+    ) %>%
+    select(
+      run_id,
+      incident_id,
+      veh_id,
+      start,
+      end,
+      Miles,
+      MPH
+    )
+  
+  return(path)
+  
+}
+
 # Function to process TPS csv file into a spatial df
 tps_process <- function(datapath) {
-  
-  # Read in Loop Data
+  # Convert series of lafd points to path
+  #
+  # Args:
+  #   datapath: path to the file
+  #
+  # Returns:
+  #   Formatted sf df of loop data for processing
+  #
   loop_data <- read.csv(datapath,
                         header = TRUE,
                         sep = ',',
@@ -274,35 +314,11 @@ server <- function(input, output) {
   
   # Reactive expression converting LAFD points to segments
   lafd_paths <- reactive({
-    
     if(!is.null(lafd_points())){
-      
-      # Merge points into linestring
-      lafd_paths <- lafd_points() %>%
-        group_by(run_id, incident_id, veh_id) %>%
-        summarize(start = min(timestmp),
-                  end = max(timestmp),
-                  Time.Sec = difftime(max(timestmp),min(timestmp),units='secs'),
-                  do_union=FALSE) %>%
-        st_cast("LINESTRING") %>%
-        # Calculate length and speed on corridor
-        mutate(
-          Miles = round((st_length(st_transform(geometry, 2229))/5280),2),
-          MPH = round((Miles/(Time.Sec/3600)),2)
-        ) %>%
-        select(
-          run_id,
-          incident_id,
-          veh_id,
-          start,
-          end,
-          Miles,
-          MPH
-        )
-      
+      lafd_points <- lafd_points()
+      lafd_paths <- JoinPtstoPath(lafd_points)
+      print(lafd_paths)
       return(lafd_paths)
-      
-      
     } else {
       return(NULL)
     }
